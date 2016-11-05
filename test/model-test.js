@@ -6,6 +6,7 @@ const expect = chai.expect;
 const sinon  = require('sinon');
 const async  = require('async');
 const is     = require('is');
+require('sinon-as-promised');
 
 const ds = require('./mocks/datastore')({
     namespace : 'com.mydomain'
@@ -109,17 +110,8 @@ describe('Model', function() {
         }
         transaction = new Transaction();
 
-        sinon.stub(transaction, 'get', (key, cb) => {
-            //setTimeout(() => {
-                cb(null, mockEntity);
-            //}, 20);
-        });
-
-        sinon.stub(transaction, 'save', function() {
-            setTimeout(function() {
-                return true;
-            }, 20);
-        });
+        sinon.stub(transaction, 'get').resolves(mockEntity);
+        sinon.stub(transaction, 'save').resolves(true);
 
         sinon.spy(transaction, 'run');
         sinon.spy(transaction, 'commit');
@@ -266,19 +258,13 @@ describe('Model', function() {
         });
     });
 
-    describe('get()', () => {
+    describe.only('get()', () => {
         let entity;
 
         beforeEach(() => {
-            entity = {
-                key: ds.key(['BlogPost', 123]),
-                data:{name:'John'}
-            };
-            sinon.stub(ds, 'get', (key, cb) => {
-                //setTimeout(function() {
-                    return cb(null, entity);
-                //}, 20);
-            });
+            entity = {name:'John'};
+            entity[ds.KEY] = ds.key(['BlogPost', 123]);
+            sinon.stub(ds, 'get').resolves(entity);
         });
 
         afterEach(() => {
@@ -286,20 +272,20 @@ describe('Model', function() {
         });
 
         it('passing an integer id', () => {
-            let result;
-            ModelInstance.get(123, (err, entity) => {
-                result = entity;
-            });
+            return ModelInstance.get(123).then(onResult);
 
-            expect(ds.get.getCall(0).args[0].constructor.name).equal('Key');
-            expect(result instanceof Entity).be.true;
+            function onResult(data) {
+                const entity = data[0];
+                expect(ds.get.getCall(0).args[0].constructor.name).equal('Key');
+                expect(entity instanceof Entity).be.true;
+            }
         });
 
         it('passing an string id', () => {
-            let result;
-            ModelInstance.get('keyname', (err, res) => {result = res;});
-
-            expect(result instanceof Entity).be.true;
+            return ModelInstance.get('keyname').then((data) => {
+                const entity = data[0];
+                expect(entity instanceof Entity).be.true;
+            });
         });
 
         it('passing an array of ids', () => {
@@ -311,107 +297,102 @@ describe('Model', function() {
             let entity2 = {name:'John'};
             entity2[ds.KEY] = ds.key(['BlogPost', 69]);
 
-            sinon.stub(ds, 'get', (key, cb) => {
-                setTimeout(function() {
-                    return cb(null, [entity2, entity1]); // not sorted
-                }, 20);
-            });
+            sinon.stub(ds, 'get').resolves([entity2, entity1]); // not sorted
 
-            ModelInstance.get([22, 69], null, null, null, {preserveOrder:true}, (err, res) => {
+            return ModelInstance.get([22, 69], null, null, null, {preserveOrder:true}).then(onResult);
+
+            function onResult(data) {
+                const entity = data[0];
                 expect(is.array(ds.get.getCall(0).args[0])).be.true;
-                expect(is.array(res)).be.true;
-                expect(res[0].entityKey.id).equal(22); // sorted
-            });
-
-            clock.tick(20);
+                expect(is.array(entity)).be.true;
+                expect(entity[0].entityKey.id).equal(22); // sorted
+            }
         });
 
         it('converting a string integer to real integer', () => {
-            ModelInstance.get('123', () => {});
-
-            expect(ds.get.getCall(0).args[0].name).not.exist;
-            expect(ds.get.getCall(0).args[0].id).equal(123);
+            return ModelInstance.get('123').then(() => {
+                expect(ds.get.getCall(0).args[0].name).not.exist;
+                expect(ds.get.getCall(0).args[0].id).equal(123);
+            });
         });
 
         it('not converting string with mix of number and non number', () => {
-            ModelInstance.get('123:456', () => {});
-
-            expect(ds.get.getCall(0).args[0].name).equal('123:456');
+            return ModelInstance.get('123:456').then(() => {
+                expect(ds.get.getCall(0).args[0].name).equal('123:456');
+            });
         });
 
         it('passing an ancestor path array', () => {
             let ancestors = ['Parent', 'keyname'];
 
-            ModelInstance.get(123, ancestors, (err, result) => {});
-
-            expect(ds.get.getCall(0).args[0].constructor.name).equal('Key');
-            expect(ds.get.getCall(0).args[0].parent.kind).equal(ancestors[0]);
-            expect(ds.get.getCall(0).args[0].parent.name).equal(ancestors[1]);
+            return ModelInstance.get(123, ancestors).then(() => {
+                expect(ds.get.getCall(0).args[0].constructor.name).equal('Key');
+                expect(ds.get.getCall(0).args[0].parent.kind).equal(ancestors[0]);
+                expect(ds.get.getCall(0).args[0].parent.name).equal(ancestors[1]);
+            });
         });
 
         it('should allow a namespace', () => {
             let namespace = 'com.mydomain-dev';
 
-            ModelInstance.get(123, null, namespace, (err, result) => {});
-
-            expect(ds.get.getCall(0).args[0].namespace).equal(namespace);
+            return ModelInstance.get(123, null, namespace).then(() => {
+                expect(ds.get.getCall(0).args[0].namespace).equal(namespace);
+            });
         });
 
-        it('on datastore get error, should return its error', () => {
+        it('on datastore get error, should reject error', () => {
             ds.get.restore();
-
             let error = {code:500, message:'Something went really bad'};
-            sinon.stub(ds, 'get', (key, cb) => {
-                return cb(error);
-            });
+            sinon.stub(ds, 'get').rejects(error);
 
-            ModelInstance.get(123, (err, entity) => {
-                expect(err).equal(error);
-                expect(entity).not.exist;
-            });
+            return ModelInstance.get(123)
+                                .catch((err) => {
+                                    expect(err).equal(error);
+                                });
         });
 
         it('on no entity found, should return a 404 error', () => {
             ds.get.restore();
 
-            sinon.stub(ds, 'get', (key, cb) => {
-                return cb(null);
-            });
+            sinon.stub(ds, 'get').resolves();
 
-            ModelInstance.get(123, (err, entity) => {
+            return ModelInstance.get(123).catch((err) => {
                 expect(err.code).equal(404);
             });
         });
 
-        it('should get in a transaction', function() {
-            ModelInstance.get(123, null, null, transaction, function(err, entity) {
+        it('should get in a transaction', () => {
+            return ModelInstance.get(123, null, null, transaction).then((data) => {
+                const entity = data[0];
                 expect(transaction.get.called).be.true;
                 expect(ds.get.called).be.false;
                 expect(entity.className).equal('Entity');
             });
         });
 
-        it('should throw error if transaction not an instance of glcoud Transaction', function() {
-            var fn = function() {
-                ModelInstance.get(123, null, null, {}, (err, entity) => {
-                    expect(transaction.get.called).be.true;
-                });
-            };
-
-            expect(fn).to.throw(Error);
+        it('should throw error if transaction not an instance of glcoud Transaction', () => {
+            return ModelInstance.get(123, null, null, {}).catch((err) => {
+                expect(err.message).equal('Transaction needs to be a gcloud Transaction');
+            });
         });
 
-        it('should return error from Transaction.get()', function() {
+        it('should return error from Transaction.get()', () => {
             transaction.get.restore();
             var error = {code:500, message: 'Houston we really need you'};
-            sinon.stub(transaction, 'get', function(key, cb) {
-                cb(error);
-            });
+            sinon.stub(transaction, 'get').rejects(error);
 
-            ModelInstance.get(123, null, null, transaction, (err, entity) => {
+            return ModelInstance.get(123, null, null, transaction).catch((err) => {
                 expect(err).equal(error);
-                expect(entity).not.exist;
             });
+        });
+
+        it('should still work with a callback', () => {
+            return ModelInstance.get(123, onResult);
+
+            function onResult(err, entity) {
+                expect(ds.get.getCall(0).args[0].constructor.name).equal('Key');
+                expect(entity instanceof Entity).be.true;
+            }
         });
     });
 
