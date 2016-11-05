@@ -110,8 +110,8 @@ describe('Model', function() {
         }
         transaction = new Transaction();
 
-        sinon.stub(transaction, 'get').resolves(mockEntity);
-        sinon.stub(transaction, 'save').resolves(true);
+        sinon.stub(transaction, 'get').resolves([mockEntity]);
+        sinon.stub(transaction, 'save').resolves([true]);
 
         sinon.spy(transaction, 'run');
         sinon.spy(transaction, 'commit');
@@ -258,13 +258,13 @@ describe('Model', function() {
         });
     });
 
-    describe.only('get()', () => {
+    describe('get()', () => {
         let entity;
 
         beforeEach(() => {
             entity = {name:'John'};
             entity[ds.KEY] = ds.key(['BlogPost', 123]);
-            sinon.stub(ds, 'get').resolves(entity);
+            sinon.stub(ds, 'get').resolves([entity]);
         });
 
         afterEach(() => {
@@ -297,7 +297,7 @@ describe('Model', function() {
             let entity2 = {name:'John'};
             entity2[ds.KEY] = ds.key(['BlogPost', 69]);
 
-            sinon.stub(ds, 'get').resolves([entity2, entity1]); // not sorted
+            sinon.stub(ds, 'get').resolves([[entity2, entity1]]); // not sorted
 
             return ModelInstance.get([22, 69], null, null, null, {preserveOrder:true}).then(onResult);
 
@@ -354,7 +354,7 @@ describe('Model', function() {
         it('on no entity found, should return a 404 error', () => {
             ds.get.restore();
 
-            sinon.stub(ds, 'get').resolves();
+            sinon.stub(ds, 'get').resolves([]);
 
             return ModelInstance.get(123).catch((err) => {
                 expect(err.code).equal(404);
@@ -398,12 +398,7 @@ describe('Model', function() {
 
     describe('update()', () => {
         beforeEach(function() {
-            sinon.stub(ds, 'transaction', function(cb, done) {
-                // return cb(transaction, function() {
-                //     done();
-                // });
-                return transaction;
-            });
+            sinon.stub(ds, 'transaction', () => transaction);
         });
 
         afterEach(() => {
