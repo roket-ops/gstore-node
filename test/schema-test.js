@@ -15,8 +15,8 @@ describe('Schema', () => {
             expect(schema.shortcutQueries).to.exist;
             expect(schema.paths).to.exist;
             expect(schema.callQueue).to.exist;
-            expect(schema.s).to.exist;
-            expect(schema.s.hooks.constructor.name).to.equal('Kareem');
+            // expect(schema.s).to.exist;
+            //expect(schema.s.hooks.constructor.name).to.equal('Kareem');
             expect(schema.options).to.exist;
             expect(schema.options.queries).deep.equal({
                 readAll : false
@@ -45,12 +45,6 @@ describe('Schema', () => {
             expect(schema.paths.property2).to.exist;
         });
 
-        // it('if no type passed, default to string', () => {
-        //     let schema = new Schema({name:{}});
-        //
-        //     expect(schema.paths.name.type).equal('string');
-        // });
-
         it ('should not allowed reserved properties on schema', function() {
             let fn = () => {
                 let schema = new Schema({ds:123});
@@ -62,9 +56,8 @@ describe('Schema', () => {
         it('should register default middelwares', () => {
             let schema = new Schema({});
 
-            expect(schema.callQueue.length).equal(1);
-            expect(schema.callQueue[0][0]).equal('pre');
-            expect(schema.callQueue[0][1][0]).equal('save');
+            expect(schema.callQueue.save).exist;
+            expect(schema.callQueue.save.pres.length).equal(1);
         });
     });
 
@@ -147,47 +140,47 @@ describe('Schema', () => {
 
     describe('callQueue', () => {
         it('should add pre hooks to callQueue', () => {
+            let preMiddleware = () => {};
             let schema = new Schema({});
-            schema.callQueue = [];
+            schema.callQueue = {};
 
-            schema.pre('save', (next) => {
-                next();
-            });
+            schema.pre('save', preMiddleware);
 
-            expect(schema.callQueue.length).equal(1);
+            expect(schema.callQueue.save).exist;
+            expect(schema.callQueue.save.pres[0]).equal(preMiddleware);
         });
 
         it('should add post hooks to callQueue', () => {
+            let postMiddleware = () => {};
             let schema = new Schema({});
-            schema.callQueue = [];
+            schema.callQueue = {};
 
-            schema.post('save', (next) => {
-                next();
-            });
+            schema.post('save', postMiddleware);
 
-            expect(schema.callQueue.length).equal(1);
+            expect(schema.callQueue.save).exist;
+            expect(schema.callQueue.save.post[0]).equal(postMiddleware);
         });
     });
 
-    describe('query hooks', () => {
-        it('should add pre findOne query hook to Kareem', () => {
-            let schema = new Schema({});
+    // describe('query hooks', () => {
+    //     it('should add pre findOne query hook to Kareem', () => {
+    //         let schema = new Schema({});
 
-            schema.pre('findOne', (next) => {
-                next();
-            });
+    //         schema.pre('findOne', (next) => {
+    //             next();
+    //         });
 
-            expect(schema.s.hooks._pres.findOne).to.exist;
-        });
+    //         expect(schema.s.hooks._pres.findOne).to.exist;
+    //     });
 
-        it('should add post findOne query hook to Kareem', () => {
-            let schema = new Schema({});
+    //     it('should add post findOne query hook to Kareem', () => {
+    //         let schema = new Schema({});
 
-            schema.post('findOne', () => {});
+    //         schema.post('findOne', () => {});
 
-            expect(schema.s.hooks._posts.findOne).to.exist;
-        });
-    });
+    //         expect(schema.s.hooks._posts.findOne).to.exist;
+    //     });
+    // });
 
     describe('virtual()', () => {
         it('should create new VirtualType', () => {

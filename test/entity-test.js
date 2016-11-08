@@ -4,6 +4,7 @@
 const chai   = require('chai');
 const expect = chai.expect;
 const sinon  = require('sinon');
+require('sinon-as-promised');
 const extend = require('extend');
 
 const ds = require('./mocks/datastore')();
@@ -43,9 +44,7 @@ describe('Entity', () => {
 
         ModelInstance = gstore.model('User', schema);
 
-        sinon.stub(ds, 'save', (entity, cb) => {
-            cb(null, entity);
-        });
+        sinon.stub(ds, 'save').resolves();
     });
 
     afterEach(function() {
@@ -53,7 +52,7 @@ describe('Entity', () => {
         clock.restore();
     });
 
-    describe('intantiate', function() {
+    describe.only('intantiate', function() {
         it('should initialized properties', (done) => {
             let model  = gstore.model('BlogPost', schema);
 
@@ -239,75 +238,72 @@ describe('Entity', () => {
 
             beforeEach(() => {
                 spyOn = {
-                    fnHookPre: (next) => {next();},
-                    fnHookPost: () => {}
+                    fnHookPre: () => { return Promise.resolve(); },
+                    fnHookPost: () => { return Promise.resolve(1234); }
                 };
+
+                sinon.spy(spyOn, 'fnHookPre');
+                sinon.spy(spyOn, 'fnHookPost');
             });
 
-            it('should call pre hooks before saving', (done) => {
-                var save = sinon.spy(spyOn, 'fnHookPre');
-                schema.pre('save', save);
+            afterEach(() => {
+                spyOn.fnHookPost.restore();
+                spyOn.fnHookPre.restore();
+            });
+
+            it('should call pre hooks before saving and override arguments', () => {
+                schema.pre('save', spyOn.fnHookPre);
                 Model  = gstore.model('BlogPost', schema);
                 entity = new Model({name:'John'});
 
-                entity.save(function() {
-                    done();
+                return entity.save().then((result) => {
+                    expect(spyOn.fnHookPre.callCount).to.equal(1);
                 });
-
-                clock.tick(50);
-                expect(save.callCount).to.equal(1);
-                save.restore();
             });
 
             it('should call pre and post hooks on custom method', () => {
-                var preNewMethod  = sinon.spy(spyOn, 'fnHookPre');
-                var postNewMethod = sinon.spy(spyOn, 'fnHookPost');
                 schema.method('newmethod', function() {
-                    this.emit('newmethod');
-                    return true;
+                    return Promise.resolve();
                 });
-                schema.pre('newmethod', preNewMethod);
-                schema.post('newmethod', postNewMethod);
+                schema.pre('newmethod', spyOn.fnHookPre);
+                schema.post('newmethod', spyOn.fnHookPost);
                 Model  = gstore.model('BlogPost', schema);
                 entity = new Model({name:'John'});
 
-                entity.newmethod();
-
-                expect(preNewMethod.callCount).to.equal(1);
-                expect(postNewMethod.callCount).to.equal(1);
-                preNewMethod.restore();
-                postNewMethod.restore();
+                return entity.newmethod().then(() => {
+                    expect(spyOn.fnHookPre.callCount).to.equal(1);
+                    expect(spyOn.fnHookPost.callCount).to.equal(1);
+                });
             });
 
-            it('should call post hooks after saving', () => {
-                let save = sinon.spy(spyOn, 'fnHookPost');
-                schema.post('save', save);
+            it('should call post hooks after saving and override resolve', () => {
+                schema.post('save', spyOn.fnHookPost);
                 Model  = gstore.model('BlogPost', schema);
                 entity = new Model({});
 
-                entity.save(() => {
+                return entity.save().then((result) => {
                     expect(spyOn.fnHookPost.called).be.true;
-                    save.restore();
+                    expect(result).equal(1234);
                 });
             });
 
             it('should not do anything if no hooks on schema', function() {
-                schema.callQueue = [];
+                schema.callQueue = {model:{}, entity:{}};
                 Model  = gstore.model('BlogPost', schema);
                 entity = new Model({name:'John'});
 
-                expect(entity._pres).not.exist;
-                expect(entity._posts).not.exist;
+                expect(entity.__pres).not.exist;
+                expect(entity.__posts).not.exist;
             });
 
             it('should not register unknown methods', () => {
-                schema.callQueue = [];
+                schema.callQueue = {model:{}, entity:{}};
                 schema.pre('unknown', () => {});
                 Model  = gstore.model('BlogPost', schema);
                 entity = new Model({});
 
-                expect(entity._pres).not.exist;
-                expect(entity._posts).not.exist;
+                expect(entity.__pres).not.exist;
+                expect(entity.__posts).not.exist;
             });
         });
     });

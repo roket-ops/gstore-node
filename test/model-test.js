@@ -19,6 +19,21 @@ const Schema              = require('../lib').Schema;
 const datastoreSerializer = require('../lib/serializer').Datastore;
 const queryHelpers        = require('../lib/helper').QueryHelpers;
 
+function MockTransaction() {
+    var _this = this;
+    this.run      = function(cb) {cb();};
+    this.get      = function(cb) {cb();};
+    this.save     = function(cb) {cb();};
+    this.delete   = function(cb) {cb();};
+    this.commit   = function(cb) {cb();};
+    this.rollback = function(cb) {cb();};
+    this.createQuery = function() {return {
+        filter:() => {},
+        scope: _this
+    }};
+    this.runQuery = function() {};
+}
+
 describe('Model', function() {
     var schema;
     var ModelInstance;
@@ -57,12 +72,6 @@ describe('Model', function() {
 
         schema.virtual('fullname').get(function() {});
 
-        sinon.stub(ds, 'save', (entity, cb) => {
-            setTimeout(() => {
-                cb(null ,entity);
-            }, 20);
-        });
-
         mockEntity = {
             name:'John',
             lastname:'Snow',
@@ -94,37 +103,19 @@ describe('Model', function() {
             //}, 20);
         });
 
-        function Transaction() {
-            var _this = this;
-            this.run      = function(cb) {cb();};
-            this.get      = function(cb) {cb();};
-            this.save     = function(cb) {cb();};
-            this.delete   = function(cb) {cb();};
-            this.commit   = function(cb) {cb();};
-            this.rollback = function(cb) {cb();};
-            this.createQuery = function() {return {
-                filter:() => {},
-                scope: _this
-            }};
-            this.runQuery = function() {};
-        }
-        transaction = new Transaction();
+        transaction = new MockTransaction();
 
         sinon.stub(transaction, 'get').resolves([mockEntity]);
-        sinon.stub(transaction, 'save').resolves([true]);
-
-        sinon.spy(transaction, 'run');
-        sinon.spy(transaction, 'commit');
-        sinon.spy(transaction, 'rollback');
+        sinon.stub(transaction, 'run').resolves();
+        sinon.stub(transaction, 'commit').resolves();
+        sinon.stub(transaction, 'rollback').resolves();
 
         ModelInstance = gstore.model('Blog', schema, gstore);
     });
 
     afterEach(function() {
-        ds.save.restore();
         ds.runQuery.restore();
         transaction.get.restore();
-        transaction.save.restore();
         transaction.run.restore();
         transaction.commit.restore();
         transaction.rollback.restore();
@@ -398,110 +389,101 @@ describe('Model', function() {
 
     describe('update()', () => {
         beforeEach(function() {
+            sinon.stub(ds, 'save').resolves();
             sinon.stub(ds, 'transaction', () => transaction);
         });
 
         afterEach(() => {
+            ds.save.restore();
             ds.transaction.restore();
         });
 
         it('should run in a transaction', function(){
-            ModelInstance.update(123, () => {});
-
-            expect(ds.transaction.called).be.true;
-            expect(transaction.run.called).be.true;
-            expect(transaction.commit.called).be.true;
+            return ModelInstance.update(123).then(() => {
+                expect(ds.transaction.called).be.true;
+                expect(transaction.run.called).be.true;
+                expect(transaction.commit.called).be.true;
+            });
         });
 
-        it('should run an entity instance', function(){
-            ModelInstance.update(123, (err, entity) => {
+        it('should return an entity instance', function(){
+            return ModelInstance.update(123).then((data) => {
+                const entity = data[0];
                 expect(entity.className).equal('Entity');
             });
         });
 
         it('should first get the entity by Key', () => {
-            ModelInstance.update(123, () => {});
-
-            expect(transaction.get.getCall(0).args[0].constructor.name).equal('Key');
-            expect(transaction.get.getCall(0).args[0].path[1]).equal(123);
+            return ModelInstance.update(123).then(() => {
+                expect(transaction.get.getCall(0).args[0].constructor.name).equal('Key');
+                expect(transaction.get.getCall(0).args[0].path[1]).equal(123);
+            });
         });
 
         it('not converting string id with mix of number and alpha chars', () => {
-            ModelInstance.update('123:456', () => {});
-
-            expect(transaction.get.getCall(0).args[0].name).equal('123:456');
+            return ModelInstance.update('123:456').then(() => {
+                expect(transaction.get.getCall(0).args[0].name).equal('123:456');
+            });
         });
 
-        it('should rollback if error while getting entity', function(done) {
+        it('should rollback if error while getting entity', () => {
             transaction.get.restore();
             let error = {code:500, message:'Houston we got a problem'};
-            sinon.stub(transaction, 'get', (key, cb) => {
-                return cb(error);
-            });
+            sinon.stub(transaction, 'get').rejects(error);
 
-            ModelInstance.update(123, (err) => {
+            return ModelInstance.update(123).catch((err) => {
                 expect(err).equal(error);
                 expect(transaction.commit.called).be.false;
-                done();
             });
         });
 
         it('should return 404 if entity not found', () => {
             transaction.get.restore();
-            sinon.stub(transaction, 'get', (key, cb) => {
-                return cb(null);
-            });
+            sinon.stub(transaction, 'get').resolves([]);
 
-            ModelInstance.update('keyname', (err, entity) => {
+            return ModelInstance.update('keyname').catch((err) => {
                 expect(err.code).equal(404);
                 expect(entity).not.exist;
             });
         });
 
-        it('should return error if any while saving', (done) => {
+        it('should return error if any while saving', () => {
             transaction.run.restore();
             let error = {code:500, message: 'Houston wee need you.'};
-            sinon.stub(transaction, 'run', function(cb) {
-                return cb(error);
-            });
+            sinon.stub(transaction, 'run').rejects(error);
 
-            ModelInstance.update(123, (err) => {
+            return ModelInstance.update(123).catch((err) => {
                 expect(err).equal(error);
-                done();
             });
-
-            clock.tick(40);
         });
 
         it('accept an ancestor path', () => {
-            let ancestors = ['Parent', 'keyname'];
+            const ancestors = ['Parent', 'keyname'];
 
-            ModelInstance.update(123, {}, ancestors, (err, entity) => {
+            return ModelInstance.update(123, {}, ancestors).then((entity) => {
                 expect(transaction.get.getCall(0).args[0].path[0]).equal('Parent');
                 expect(transaction.get.getCall(0).args[0].path[1]).equal('keyname');
             });
         });
 
         it('should allow a namespace', () => {
-            let namespace = 'com.mydomain-dev';
+            const namespace = 'com.mydomain-dev';
 
-            ModelInstance.update(123, {}, null, namespace, (err, result) => {
+            return ModelInstance.update(123, {}, null, namespace).then((result) => {
                 expect(transaction.get.getCall(0).args[0].namespace).equal(namespace);
             });
         });
 
-        it('should save and replace data', (done) => {
-            let data = {
+        it('should save and replace data', () => {
+            const data = {
                 name : 'Mick'
             };
-            ModelInstance.update(123, data, null, null, null, {replace:true}, (err, entity) => {
+            return ModelInstance.update(123, data, null, null, null, {replace:true}).then((data) => {
+                const entity = data[0];
                 expect(entity.entityData.name).equal('Mick');
                 expect(entity.entityData.lastname).not.exist;
                 expect(entity.entityData.email).not.exist;
             });
-
-            clock.tick(60);
-            done();
         });
 
         it('should merge the new data with the entity data', (done) => {
